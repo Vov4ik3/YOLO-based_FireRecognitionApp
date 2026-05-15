@@ -1,0 +1,215 @@
+@startuml FireDetectionApp_ClassDiagram
+
+'left to right direction
+
+skinparam backgroundColor #ffffff
+skinparam ClassBackgroundColor #ffffff
+skinparam ClassBorderColor #333333
+skinparam ClassFontColor #000000
+skinparam ClassAttributeFontColor #222222
+skinparam ClassStereotypeFontColor #555555
+skinparam ArrowColor #333333
+skinparam NoteBackgroundColor #f5f5f5
+skinparam NoteBorderColor #333333
+skinparam NoteFontColor #000000
+skinparam PackageBackgroundColor #f9f9f9
+skinparam PackageBorderColor #555555
+skinparam PackageFontColor #000000
+skinparam shadowing false
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 100
+skinparam padding 8
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam ArrowFontSize 10
+skinparam ArrowFontColor #555555
+skinparam classAttributeIconSize 0
+
+title Fire Detection System - Class Diagram
+
+' ─────────────────────────────────────────
+' PACKAGE: models
+' Sits on the far left, standalone.
+' Only TrackedObject lives here.
+' ─────────────────────────────────────────
+package "models" #f0f4ff {
+
+    class TrackedObject {
+        + track_id : int
+        + label : str
+        + first_seen : datetime
+        + last_seen : datetime
+        + frames : int
+        --
+        + update() : None
+        + duration_seconds() : float
+        + __str__() : str
+    }
+
+}
+
+' ─────────────────────────────────────────
+' PACKAGE: core
+' Detector and Camera sit in the middle column.
+' ─────────────────────────────────────────
+package "core" #f0fff4 {
+
+    class Camera {
+        + source : int | str
+        + label : str
+        - _cap : VideoCapture
+        - _measured_fps : int
+        - _is_image : bool
+        - _is_video_file : bool
+        --
+        + open() : bool
+        + read() : tuple
+        + release() : None
+        + measure_fps() : int
+        + fps : int
+        + resolution : tuple
+        + is_open : bool
+        + is_image : bool
+        + is_video_file : bool
+    }
+
+    class Detector {
+        + classes : list
+        - _model : YOLO
+        - _last_frame_ids : set
+        --
+        + process_frame(frame) : tuple
+        + clear() : None
+        + total_tracked : int
+        + current_count : int
+    }
+
+}
+
+' ─────────────────────────────────────────
+' PACKAGE: utils
+' FrameTimer, ImageUtils, DebugUtils.
+' Placed below core to keep arrows short.
+' ─────────────────────────────────────────
+package "utils" #fffdf0 {
+
+    class FrameTimer {
+        + frame_count : int
+        - _window : int
+        - _times : list
+        - _frame_start : float
+        --
+        + start() : None
+        + stop() : float
+        + avg_ms : float
+        + avg_fps : float
+    }
+
+    class ImageUtils <<utility>> {
+        + {static} frame_to_qimage(frame) : QImage
+        + {static} fit_pixmap_to_label(img, lbl) : QPixmap
+    }
+
+    class DebugUtils <<utility>> {
+        + {static} DEBUG : bool
+        + {static} is_debug() : bool
+        + {static} log(section, message) : None
+        + {static} print_detections(results) : None
+        + {static} print_memory() : None
+        + {static} print_banner(path, fps, res) : None
+    }
+
+}
+
+' ─────────────────────────────────────────
+' PACKAGE: ui
+' Three UI classes on the far right column.
+' Signals listed cleanly in their own section.
+' ─────────────────────────────────────────
+package "ui" #fff0f0 {
+
+    class CameraManager {
+        - _cameras : list
+        --
+        + get_selected_camera() : Camera
+        - _add_camera(cam) : None
+        - _add_webcam_dialog() : None
+        - _add_ip_dialog() : None
+        - _add_video_dialog() : None
+        - _add_image_dialog() : None
+        - _remove_selected() : None
+        --
+        + source_selected : pyqtSignal
+    }
+
+    class LogPanel {
+        - _list_widget : QListWidget
+        - _count_label : QLabel
+        --
+        + add_entry(obj) : None
+        + update_entry(obj) : None
+        + clear() : None
+        - _update_count() : None
+        --
+        + fire_detected : pyqtSignal
+        + cleared : pyqtSignal
+    }
+
+    class MainWindow {
+        - _flash_timer : QTimer
+        - _flash_count : int
+        - _frame_timer : QTimer
+        --
+        + start_feed() : None
+        + stop_feed() : None
+        - _update_frame() : None
+        - _on_source_selected(cam) : None
+        - _start_taskbar_flash() : None
+        - _do_flash() : None
+        - _on_log_cleared() : None
+    }
+
+}
+
+' ─────────────────────────────────────────
+' RELATIONSHIPS
+'
+' Reading left to right:
+'   models -> core -> ui
+'   utils sits below core and ui
+'
+' Compositions (*--) flow rightward
+' Dependencies (..>) flow downward into utils
+' Signal flows (..) kept short and local
+' ─────────────────────────────────────────
+
+' MainWindow owns its three children
+MainWindow "1" *-left- "1" Detector      : owns
+MainWindow "1" *-left- "1" CameraManager : owns
+MainWindow "1" *-left- "1" LogPanel      : owns
+
+' MainWindow holds a reference to the active camera
+MainWindow "1" o-left- "0..1" Camera     : active camera
+
+' CameraManager holds a list of cameras
+CameraManager "1" *-left- "0..*" Camera  : manages
+
+' Detector tracks objects and uses a timer
+Detector "1" *-left- "0..*" TrackedObject : tracks
+Detector "1" *-down- "1" FrameTimer       : uses
+
+' LogPanel only reads TrackedObject, it does not own it
+LogPanel ..> TrackedObject                : displays
+
+' Signal dependencies - kept horizontal so they do not cross classes
+CameraManager .up.> MainWindow           : source_selected
+LogPanel .up.> MainWindow                : fire_detected
+LogPanel .up.> MainWindow                : cleared
+
+' Utility dependencies flow downward out of core and ui
+Detector .down.> DebugUtils              : uses
+MainWindow .down.> ImageUtils            : uses
+MainWindow .down.> DebugUtils            : uses
+
+@enduml

@@ -1,0 +1,283 @@
+@startuml FireDetectionApp_SequenceDiagram
+
+skinparam backgroundColor #ffffff
+skinparam SequenceActorBackgroundColor #ffffff
+skinparam SequenceActorBorderColor #333333
+skinparam SequenceActorFontColor #000000
+skinparam SequenceActorFontSize 12
+skinparam SequenceLifeLineBorderColor #888888
+skinparam SequenceLifeLineBorderThickness 1
+skinparam SequenceParticipantBackgroundColor #ffffff
+skinparam SequenceParticipantBorderColor #333333
+skinparam SequenceParticipantFontColor #000000
+skinparam SequenceParticipantFontSize 12
+skinparam SequenceArrowColor #333333
+skinparam SequenceArrowFontColor #555555
+skinparam SequenceArrowFontSize 11
+skinparam SequenceBoxBackgroundColor #f9f9f9
+skinparam SequenceBoxBorderColor #555555
+skinparam SequenceBoxFontColor #000000
+skinparam SequenceGroupBackgroundColor #f0f4ff
+skinparam SequenceGroupBorderColor #333333
+skinparam SequenceGroupFontColor #000000
+skinparam SequenceGroupFontSize 11
+skinparam SequenceDividerBackgroundColor #efefef
+skinparam SequenceDividerBorderColor #333333
+skinparam SequenceDividerFontColor #000000
+skinparam shadowing false
+skinparam defaultFontName Arial
+
+title Fire Detection System - Sequence Diagram
+
+' ─────────────────────────────────────────
+' PARTICIPANTS (lifelines)
+' ─────────────────────────────────────────
+actor       "User"          as user
+participant "MainWindow"    as mw
+participant "CameraManager" as cm
+participant "Camera"        as cam
+participant "Detector"      as det
+participant "LogPanel"      as log
+participant "DebugUtils"    as dbg
+
+' ─────────────────────────────────────────
+' STARTUP
+' ─────────────────────────────────────────
+== Application Startup ==
+
+user -> mw      : launch application
+activate mw
+
+mw -> det       : Detector(model_path="fire.pt")
+activate det
+det -> det      : YOLO("fire.pt")
+det -> dbg      : log("DETECTOR", "Model ready")
+det --> mw      : detector ready
+deactivate det
+
+mw -> cm        : CameraManager()
+activate cm
+cm -> cam       : Camera(source=0, label="Webcam 0")
+activate cam
+cam --> cm      : camera object
+cm --> mw       : manager ready
+deactivate cam
+
+mw -> log       : LogPanel()
+activate log
+log --> mw      : log panel ready
+deactivate log
+
+mw --> user     : UI displayed
+
+' ─────────────────────────────────────────
+' SOURCE MANAGEMENT
+' ─────────────────────────────────────────
+== Source Management ==
+
+alt Add webcam
+    user -> cm      : click "+ Webcam"
+    cm -> user      : prompt for camera index
+    user -> cm      : enter index (e.g. 0)
+    cm -> cam       : Camera(source=index)
+    activate cam
+    cam --> cm      : camera object
+    deactivate cam
+    cm -> cm        : _add_camera()\n_refresh_list()
+    cm --> mw       : source_selected signal
+    mw -> mw        : active_camera = camera
+
+else Add IP camera
+    user -> cm      : click "+ IP Camera"
+    cm -> user      : prompt for RTSP URL
+    user -> cm      : enter URL
+    cm -> cam       : Camera(source=url)
+    activate cam
+    cam --> cm      : camera object
+    deactivate cam
+    cm -> cm        : _add_camera()\n_refresh_list()
+    cm --> mw       : source_selected signal
+    mw -> mw        : active_camera = camera
+
+else Import video file
+    user -> cm      : click "+ Video file"
+    cm -> user      : open file browser
+    user -> cm      : select .mp4 / .avi / .mov
+    cm -> cam       : Camera(source=file_path)
+    activate cam
+    cam --> cm      : camera object
+    deactivate cam
+    cm -> cm        : _add_camera()\n_refresh_list()
+    cm --> mw       : source_selected signal
+    mw -> mw        : active_camera = camera
+
+else Import image file
+    user -> cm      : click "+ Image"
+    cm -> user      : open file browser
+    user -> cm      : select .png / .jpg
+    cm -> cam       : Camera(source=image_path)
+    activate cam
+    cam --> cm      : camera object
+    deactivate cam
+    cm -> cm        : _add_camera()\n_refresh_list()
+    cm --> mw       : source_selected signal
+    mw -> mw        : active_camera = camera
+
+end
+
+' ─────────────────────────────────────────
+' FEED STARTUP
+' ─────────────────────────────────────────
+== Feed Startup ==
+
+user -> mw      : press Start
+mw -> cam       : camera.open()
+activate cam
+
+alt Camera failed to open
+    cam --> mw      : return False
+    mw --> user     : show error in status bar
+
+else Camera opened successfully
+    cam --> mw      : return True
+
+    alt Image file
+        mw -> mw    : fps = 1
+    else Video file
+        mw -> cam   : read fps from CAP_PROP_FPS
+        cam --> mw  : fps value from metadata
+    else Live camera
+        mw -> cam   : measure_fps(sample_frames=30)
+        cam --> mw  : measured fps
+    end
+
+    mw -> mw        : interval = 1000 / fps
+    mw -> mw        : frame_timer.start(interval)
+    mw --> user     : status bar: fps and resolution
+    dbg -> dbg      : print_banner() if debug mode
+
+end
+
+' ─────────────────────────────────────────
+' FRAME LOOP
+' ─────────────────────────────────────────
+== Frame Loop (every N ms) ==
+
+loop every frame_timer tick
+
+    mw -> cam       : camera.read()
+
+    alt Read failed or end of file
+        cam --> mw      : return False, None
+        mw --> user     : show feed ended message
+        mw -> mw        : stop_feed()
+
+    else Frame read OK
+        cam --> mw      : return True, frame
+
+        opt Debug mode active
+            mw -> dbg   : FrameTimer.start()
+        end
+
+        mw -> det       : process_frame(frame)
+        activate det
+
+        det -> det      : model.track(\n  conf=0.9, iou=0.5,\n  bytetrack.yaml\n)
+
+        opt Debug mode active
+            det -> dbg  : FrameTimer.stop()
+            det -> dbg  : print_detections()
+        end
+
+        alt Fire or smoke detected
+
+            loop for each detected object
+
+                alt New track_id
+                    det -> det      : create TrackedObject\n(track_id, label, now)
+                    det --> mw      : new_ids list
+                    mw -> log       : add_entry(tracked_object)
+                    activate log
+                    log -> log      : insert row with PC timecode
+                    log --> mw      : emit fire_detected signal
+                    deactivate log
+
+                    mw -> mw        : _start_taskbar_flash()
+                    mw -> mw        : flash_timer.start(500ms)
+
+                    loop flash_count < 10
+                        mw -> mw    : QApplication.alert()
+                        mw -> mw    : flash_count++
+                    end
+
+                    mw -> mw        : flash_timer.stop()
+
+                else Existing track_id
+                    det -> det      : tracked_object.update()\nlast_seen, frames++
+                    det --> mw      : updated_ids list
+
+                    opt frames % 30 == 0
+                        mw -> log   : update_entry()\nrefresh last seen time
+                    end
+
+                end
+
+            end
+
+            mw -> mw        : update info label\n"Fire in frame: N  Total: M"
+
+        else No detections
+            det --> mw      : empty new_ids, updated_ids
+            mw -> mw        : update info label\n"Fire in frame: 0"
+
+        end
+
+        deactivate det
+
+        mw -> mw        : frame_to_qimage(annotated)
+        mw -> mw        : fit_pixmap_to_label()
+        mw --> user     : render annotated frame
+
+    end
+
+end
+
+' ─────────────────────────────────────────
+' LOG MANAGEMENT
+' ─────────────────────────────────────────
+== Log Management ==
+
+opt User clears the log
+    user -> log     : press Clear Log
+    activate log
+    log -> log      : clear() all entries
+    log --> mw      : emit cleared signal
+    deactivate log
+    mw -> det       : clear() tracked_objects
+    mw --> user     : reset info label
+end
+
+' ─────────────────────────────────────────
+' FEED SHUTDOWN
+' ─────────────────────────────────────────
+== Feed Shutdown ==
+
+user -> mw      : press Stop
+mw -> mw        : frame_timer.stop()
+mw -> mw        : flash_timer.stop()
+mw -> cam       : camera.release()
+deactivate cam
+mw --> user     : status bar: total events logged
+
+' ─────────────────────────────────────────
+' APP SHUTDOWN
+' ─────────────────────────────────────────
+== Application Shutdown ==
+
+user -> mw      : close window
+mw -> mw        : closeEvent()
+mw -> mw        : stop_feed() cleanup
+deactivate mw
+mw --> user     : application exits
+
+@enduml
