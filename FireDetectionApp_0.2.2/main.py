@@ -3,7 +3,7 @@ import sys
 import warnings
 import logging
 
-# Add project root to path so all submodules can find each other
+# Project root
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 warnings.filterwarnings("ignore")
