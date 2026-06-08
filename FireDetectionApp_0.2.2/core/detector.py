@@ -44,7 +44,7 @@ class Detector:
             classes=self.classes,
             verbose=False,
             conf=0.4,   # only accept detections the model is at least 90% sure about
-            iou=0.5,    # merge boxes that overlap a lot (avoids double-counting)
+            iou=0.6,    # merge boxes that overlap a lot (avoids double-counting)
             tracker="bytetrack.yaml",
         )
 
